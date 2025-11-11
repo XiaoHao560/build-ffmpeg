@@ -124,7 +124,7 @@ jobs:
             --enable-static --disable-shared --disable-docs \
             --libc=bionic \
             --as=$AS --ar=$AR --nm=$NM --strip=$STRIP \
-            --sysroot=$SYSROOT
+            --sysroot=$SYSROOT || cat config.log | tail -n 30
           make -j$(nproc) install
           cd ..
 
