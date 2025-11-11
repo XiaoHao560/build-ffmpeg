@@ -43,7 +43,6 @@ jobs:
           git clone --depth=1 https://github.com/videolan/x265.git
           git clone --depth=1 https://github.com/webmproject/libvpx.git
           git clone --depth=1 https://github.com/xiph/opus.git
-          git clone --depth=1 https://github.com/mstorsjo/opus.git
           git clone --depth=1 https://github.com/mstorsjo/soxr.git
           git clone --depth=1 https://github.com/libass/libass.git
           git clone --depth=1 https://github.com/mozilla/mozjpeg.git
