@@ -72,6 +72,7 @@ jobs:
           ./configure --prefix=$HOME/x264-build/${ARCH} \
             --host=$HOST --enable-shared --enable-pic --disable-cli \
             --extra-cflags="-Os -fpic $EXTRACFLAGS"
+            CC=$CC
           make -j$(nproc) install
           cd ..
 
