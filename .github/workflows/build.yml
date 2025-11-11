@@ -88,9 +88,10 @@ jobs:
           cd lame
           ./configure --prefix=$HOME/lame-build/${ARCH} \
             --host=$HOST --enable-shared --disable-static \
-            CC=$CC
+            --disable-frontend   # 不编 frontend，避开 clang 报错
           make -j$(nproc) install
           cd ..
+
 
       # 编译 opus
       - name: Build Opus
