@@ -122,9 +122,8 @@ jobs:
             --target=${VPX_TARGET} \
             --disable-examples --disable-unit-tests \
             --enable-static --disable-shared --disable-docs \
-            --libc=bionic \
             --as=$AS --ar=$AR --nm=$NM --strip=$STRIP \
-            --sysroot=$SYSROOT || cat config.log | tail -n 30
+            --sysroot=$SYSROOT
           make -j$(nproc) install
           cd ..
 
