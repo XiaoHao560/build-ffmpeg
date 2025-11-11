@@ -8,106 +8,178 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        arch: [arm64, armv7]
+
+    env:
+      NDK_VERSION: r27c
+
     steps:
       - uses: actions/checkout@v4
 
-      # 1. 安装并缓存 NDK
+      # 安装并缓存 NDK
       - uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r27c
+          ndk-version: ${{ env.NDK_VERSION }}
           local-cache: true
           add-to-path: false
 
-      # 2. 缓存第三方预编译目录
-      - name: Cache prebuilt
-        uses: actions/cache@v4
-        id: cache-prebuilt
-        with:
-          path: |
-            ~/x264-build
-            ~/fdk-build
-          key: prebuilt-${{ runner.os }}-${{ hashFiles('.github/workflows/android-ffmpeg.yml') }}
-
-      # 3. 系统依赖
-      - name: Install deps
+      # 安装系统依赖
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm autoconf automake libtool pkg-config
+          sudo apt-get install -y nasm autoconf automake libtool pkg-config \
+              cmake yasm zlib1g-dev libass-dev libfreetype6-dev
 
-      # 4. 拉源码（浅克隆加速）
+      # 拉源码
       - name: Clone sources
         run: |
-          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git
-          git clone --depth 1 --branch stable https://code.videolan.org/videolan/x264.git
-          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
+          git clone --depth=1 https://git.ffmpeg.org/ffmpeg.git
+          git clone --depth=1 --branch stable https://code.videolan.org/videolan/x264.git
+          git clone --depth=1 https://github.com/mstorsjo/fdk-aac.git
+          git clone --depth=1 https://github.com/videolan/x265.git
+          git clone --depth=1 https://github.com/webmproject/libvpx.git
+          git clone --depth=1 https://github.com/xiph/opus.git
+          git clone --depth=1 https://github.com/mstorsjo/opus.git
+          git clone --depth=1 https://github.com/mstorsjo/soxr.git
+          git clone --depth=1 https://github.com/libass/libass.git
+          git clone --depth=1 https://github.com/mozilla/mozjpeg.git
+          git clone --depth=1 https://github.com/mstorsjo/lame.git
 
-      # 5. 编译 x264（兼容老版本 configure）
+      - name: Set up cross compile env
+        id: env
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
+            echo "CPU=armv8-a" >> $GITHUB_ENV
+            echo "ARCH=arm64" >> $GITHUB_ENV
+            echo 'EXTRACFLAGS="-march=armv8-a"' >> $GITHUB_ENV
+          else
+            echo "HOST=armv7a-linux-androideabi" >> $GITHUB_ENV
+            echo "CPU=armv7-a" >> $GITHUB_ENV
+            echo "ARCH=arm" >> $GITHUB_ENV
+            echo 'EXTRACFLAGS="-march=armv7-a -mfpu=neon"' >> $GITHUB_ENV
+          fi
+          export NDK=${{ steps.setup-ndk.outputs.ndk-path }}
+          echo "CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang" >> $GITHUB_ENV
+
+      # 编译 x264
       - name: Build x264
-        if: steps.cache-prebuilt.outputs.cache-hit != 'true'
         run: |
-          for arch in arm64 armv7; do
-            if [ "$arch" = "arm64" ]; then
-              HOST=aarch64-linux-android
-              EXTRA="-march=armv8-a"
-            else
-              HOST=armv7a-linux-androideabi
-              EXTRA="-march=armv7-a -mfpu=neon"
-            fi
-            CC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang
-            cd x264
-            ./configure --prefix=$HOME/x264-build/$arch \
-              --host=$HOST --enable-shared --enable-pic \
-              --disable-cli --extra-cflags="-Os -fpic $EXTRA"
-            make -j$(nproc) install
-            cd ..
-          done
+          cd x264
+          ./configure --prefix=$HOME/x264-build/${ARCH} \
+            --host=$HOST --enable-shared --enable-pic --disable-cli \
+            --extra-cflags="-Os -fpic $EXTRACFLAGS"
+          make -j$(nproc) install
+          cd ..
 
-      # 6. 编译 fdk-aac
+      # 编译 fdk-aac
       - name: Build fdk-aac
-        if: steps.cache-prebuilt.outputs.cache-hit != 'true'
         run: |
-          for arch in arm64 armv7; do
-            [ "$arch" = "arm64" ] && HOST=aarch64-linux-android || HOST=armv7a-linux-androideabi
-            CC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang
-            cd fdk-aac
-            ./autogen.sh
-            ./configure --prefix=$HOME/fdk-build/$arch \
-              --host=$HOST --enable-shared --disable-static \
-              CC=$CC CXX=${CC}++
-            make -j$(nproc) install
-            cd ..
-          done
+          cd fdk-aac
+          autoreconf -fiv
+          ./configure --prefix=$HOME/fdk-build/${ARCH} \
+            --host=$HOST --enable-shared --disable-static \
+            CC="$CC" CXX="${CC}++"
+          make -j$(nproc) install
+          cd ..
 
-      # 7. 编译 FFmpeg（双架构）
-      - name: Build FFmpeg
+      # 编译 mp3lame
+      - name: Build LAME(mp3)
         run: |
-          for arch in arm64 armv7; do
-            [ "$arch" = "arm64" ] && HOST=aarch64-linux-android && CPU=armv8-a || HOST=armv7a-linux-androideabi && CPU=armv7-a
-            TC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64
-            CC=$TC/bin/${HOST}21-clang
-            ./ffmpeg/configure \
-              --prefix=$PWD/output/$arch \
-              --target-os=android --arch=${ARCH/armv7/arm} --cpu=$CPU \
-              --enable-cross-compile --cc=$CC --cxx=${CC}++ \
-              --sysroot=$TC/sysroot \
-              --enable-shared --disable-static --enable-small \
-              --enable-gpl --enable-nonfree --enable-version3 \
-              --enable-jni --enable-mediacodec \
-              --enable-libx264 --enable-libfdk-aac \
-              --enable-encoder=libx264,libfdk_aac \
-              --enable-decoder=aac,h264,hevc,mp3,opus,vp9 \
-              --enable-demuxer=rtsp,hls,mp4,flv --enable-muxer=mp4,flv \
-              --enable-protocol=http,https,tcp,udp,file \
-              --enable-filter=scale,fps,rotate,overlay,amix \
-              --extra-cflags="-I$HOME/x264-build/$arch/include -I$HOME/fdk-build/$arch/include" \
-              --extra-ldflags="-L$HOME/x264-build/$arch/lib -L$HOME/fdk-build/$arch/lib"
-            make -j$(nproc) install
-          done
+          cd lame
+          ./configure --prefix=$HOME/lame-build/${ARCH} \
+            --host=$HOST --enable-shared --disable-static \
+            CC=$CC
+          make -j$(nproc) install
+          cd ..
 
-      # 8. 上传产物
+      # 编译 opus
+      - name: Build Opus
+        run: |
+          cd opus
+          ./autogen.sh || true
+          ./configure --prefix=$HOME/opus-build/${ARCH} \
+            --host=$HOST --enable-shared --disable-static CC=$CC
+          make -j$(nproc) install
+          cd ..
+
+      # 编译 libvpx
+      - name: Build libvpx
+        run: |
+          cd libvpx
+          ./configure --prefix=$HOME/vpx-build/${ARCH} --target=${HOST} \
+            --disable-examples --disable-unit-tests --disable-static --enable-shared --disable-docs
+          make -j$(nproc) install
+          cd ..
+
+      # 编译 x265
+      - name: Build x265
+        run: |
+          cd x265/build
+          cmake -G "Unix Makefiles" ../source \
+            -DCMAKE_C_COMPILER=$CC \
+            -DCMAKE_CXX_COMPILER=${CC}++ \
+            -DCMAKE_INSTALL_PREFIX=$HOME/x265-build/${ARCH} \
+            -DENABLE_SHARED=ON -DENABLE_STATIC=OFF
+          make -j$(nproc) install
+          cd ../../
+
+      # 编译 libass
+      - name: Build libass
+        run: |
+          cd libass
+          ./autogen.sh || true
+          ./configure --prefix=$HOME/libass-build/${ARCH} \
+            --host=$HOST --enable-shared --disable-static \
+            CC=$CC
+          make -j$(nproc) install
+          cd ..
+
+      # 编译 soxr
+      - name: Build soxr
+        run: |
+          cd soxr
+          cmake -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+                -DANDROID_ABI=${ARCH} \
+                -DCMAKE_INSTALL_PREFIX=$HOME/soxr-build/${ARCH} .
+          make -j$(nproc) install
+          cd ..
+
+      # 编译 FFmpeg
+      - name: Build FFmpeg (Full)
+        run: |
+          export COMMONFLAGS="-I$HOME/x264-build/${ARCH}/include -I$HOME/fdk-build/${ARCH}/include -I$HOME/lame-build/${ARCH}/include -I$HOME/opus-build/${ARCH}/include -I$HOME/vpx-build/${ARCH}/include -I$HOME/x265-build/${ARCH}/include -I$HOME/soxr-build/${ARCH}/include -I$HOME/libass-build/${ARCH}/include"
+          export COMMONLD="-L$HOME/x264-build/${ARCH}/lib -L$HOME/fdk-build/${ARCH}/lib -L$HOME/lame-build/${ARCH}/lib -L$HOME/opus-build/${ARCH}/lib -L$HOME/vpx-build/${ARCH}/lib -L$HOME/x265-build/${ARCH}/lib -L$HOME/soxr-build/${ARCH}/lib -L$HOME/libass-build/${ARCH}/lib"
+          cd ffmpeg
+          ./configure \
+            --prefix=$GITHUB_WORKSPACE/output/${ARCH} \
+            --target-os=android --arch=$ARCH --cpu=$CPU \
+            --enable-cross-compile --cc=$CC --cxx=${CC}++ \
+            --sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+            --enable-shared --disable-static --enable-small \
+            --enable-gpl --enable-nonfree --enable-version3 \
+            --enable-jni --enable-mediacodec \
+            --enable-libx264 --enable-libx265 --enable-libfdk-aac \
+            --enable-libmp3lame --enable-libopus --enable-libvpx \
+            --enable-libass --enable-libsoxr \
+            --enable-encoder=libx264,libx265,libfdk_aac,libmp3lame,libopus \
+            --enable-decoder=aac,mp3,opus,vp8,vp9,h264,hevc \
+            --enable-protocol=http,https,tcp,udp,file,rtp,rtsp \
+            --enable-demuxer=mov,mp4,matroska,mp3,aac,flv,mkv \
+            --enable-muxer=mp4,matroska,webm,flv \
+            --enable-filter=scale,fps,rotate,overlay,amix \
+            --extra-cflags="$COMMONFLAGS $EXTRACFLAGS" \
+            --extra-ldflags="$COMMONLD"
+          make -j$(nproc) install
+          cd ..
+
+      # 上传产物
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-android-libs
-          path: output/
+          name: ffmpeg-android-libs-${{ matrix.arch }}
+          path: output/${{ matrix.arch }}/
