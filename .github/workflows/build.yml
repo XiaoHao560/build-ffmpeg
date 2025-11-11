@@ -69,10 +69,10 @@ jobs:
       - name: Build x264
         run: |
           cd x264
+          export CC=$CC
           ./configure --prefix=$HOME/x264-build/${ARCH} \
             --host=$HOST --enable-shared --enable-pic --disable-cli \
-            --extra-cflags="-Os -fpic $EXTRACFLAGS" \
-            CC=$CC
+            --extra-cflags="-Os -fpic $EXTRACFLAGS"
           make -j$(nproc) install
           cd ..
 
