@@ -1,0 +1,104 @@
+name: Build FFmpeg for Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 安装并缓存 NDK
+      - uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r27c
+          local-cache: true
+          add-to-path: false
+
+      # 2. 缓存 x264 & fdk-aac 中间目录
+      - name: Cache prebuilt deps
+        uses: actions/cache@v4
+        id: cache-prebuilt
+        with:
+          path: |
+            ~/x264-build
+            ~/fdk-build
+          key: prebuilt-${{ runner.os }}-${{ hashFiles('**/build*.sh') }}
+
+      # 3. 安装系统依赖
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm autoconf automake libtool pkg-config
+
+      # 4. 下载源码
+      - name: Clone sources
+        run: |
+          git clone --depth 1 https://git.ffmpeg.org/ffmpeg.git
+          git clone --depth 1 https://code.videolan.org/videolan/x264.git
+          git clone --depth 1 https://github.com/mstorsjo/fdk-aac.git
+
+      # 5. 编译 x264（缓存命中则跳过）
+      - name: Build x264
+        if: steps.cache-prebuilt.outputs.cache-hit != 'true'
+        run: |
+          for arch in arm64 armv7; do
+            [[ $arch == arm64 ]] && HOST=aarch64-linux-android || HOST=armv7a-linux-androideabi
+            CC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang
+            ./x264/configure --prefix=$HOME/x264-build/$arch --host=$HOST \
+              --enable-shared --disable-static --enable-pic --disable-cli \
+              --cc=$CC --extra-cflags="-Os -fpic"
+            make -j$(nproc) install
+          done
+        shell: bash
+
+      # 6. 编译 fdk-aac（缓存命中则跳过）
+      - name: Build fdk-aac
+        if: steps.cache-prebuilt.outputs.cache-hit != 'true'
+        run: |
+          for arch in arm64 armv7; do
+            [[ $arch == arm64 ]] && HOST=aarch64-linux-android || HOST=armv7a-linux-androideabi
+            CC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang
+            cd fdk-aac && ./autogen.sh
+            ./configure --prefix=$HOME/fdk-build/$arch --host=$HOST \
+              --enable-shared --disable-static CC=$CXX CXX=${CC}++
+            make -j$(nproc) install && cd ..
+          done
+        shell: bash
+
+      # 7. 编译 FFmpeg（双架构）
+      - name: Build FFmpeg
+        run: |
+          for arch in arm64 armv7; do
+            [[ $arch == arm64 ]] && HOST=aarch64-linux-android && CPU=armv8-a || HOST=armv7a-linux-androideabi && CPU=armv7-a
+            TC=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64
+            CC=$TC/bin/${HOST}21-clang
+            ./ffmpeg/configure \
+              --prefix=$PWD/output/$arch \
+              --target-os=android --arch=${ARCH/armv7/arm} --cpu=$CPU \
+              --enable-cross-compile --cc=$CC --cxx=${CC}++ \
+              --sysroot=$TC/sysroot \
+              --enable-shared --disable-static --enable-small \
+              --enable-gpl --enable-nonfree --enable-version3 \
+              --enable-jni --enable-mediacodec \
+              --enable-libx264 --enable-libfdk-aac \
+              --enable-encoder=libx264,libfdk_aac,h264_vaapi \
+              --enable-decoder=aac,h264,hevc,mp3,opus,vp9 \
+              --enable-demuxer=rtsp,hls,mp4,flv --enable-muxer=mp4,flv \
+              --enable-protocol=http,https,tcp,udp,file \
+              --enable-filter=scale,fps,rotate,overlay,amix \
+              --extra-cflags="-I$HOME/x264-build/$arch/include -I$HOME/fdk-build/$arch/include" \
+              --extra-ldflags="-L$HOME/x264-build/$arch/lib -L$HOME/fdk-build/$arch/lib"
+            make -j$(nproc) install
+          done
+
+      # 8. 打包 & 上传
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android
+          path: output/
