@@ -47,23 +47,18 @@ jobs:
           git clone --depth=1 https://github.com/libass/libass.git
           git clone --depth=1 https://github.com/mozilla/mozjpeg.git
           git clone --depth=1 https://github.com/lameproject/lame.git
-
+          
       - name: Set up cross compile env
-        id: env
         run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            echo "HOST=aarch64-linux-android" >> $GITHUB_ENV
-            echo "CPU=armv8-a" >> $GITHUB_ENV
-            echo "ARCH=arm64" >> $GITHUB_ENV
-            echo 'EXTRACFLAGS="-march=armv8-a"' >> $GITHUB_ENV
-          else
-            echo "HOST=armv7a-linux-androideabi" >> $GITHUB_ENV
-            echo "CPU=armv7-a" >> $GITHUB_ENV
-            echo "ARCH=arm" >> $GITHUB_ENV
-            echo 'EXTRACFLAGS="-march=armv7-a -mfpu=neon"' >> $GITHUB_ENV
-          fi
           export NDK=${{ steps.setup-ndk.outputs.ndk-path }}
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            HOST=aarch64-linux-android
+          else
+            HOST=armv7a-linux-androideabi
+          fi
+          echo "HOST=$HOST" >> $GITHUB_ENV
           echo "CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${HOST}21-clang" >> $GITHUB_ENV
+
 
       # 编译 x264
       - name: Build x264
