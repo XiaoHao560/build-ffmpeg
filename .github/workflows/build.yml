@@ -46,7 +46,7 @@ jobs:
           git clone --depth=1 https://github.com/chirlu/soxr.git
           git clone --depth=1 https://github.com/libass/libass.git
           git clone --depth=1 https://github.com/mozilla/mozjpeg.git
-          git clone --depth=1 https://github.com/lame-project/lame.git
+          git clone --depth=1 https://github.com/lameproject/lame.git
 
       - name: Set up cross compile env
         id: env
