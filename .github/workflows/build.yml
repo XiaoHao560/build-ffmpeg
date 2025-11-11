@@ -111,17 +111,18 @@ jobs:
       # 编译 libvpx
       - name: Build libvpx
         run: |
-          export SYSROOT=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot
-          export AR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
-          export AS=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-as
-          export NM=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm
-          export STRIP=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+          export TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          export SYSROOT=$TC/sysroot
+          export AR=$TC/bin/llvm-ar
+          export AS=$TC/bin/llvm-as
+          export NM=$TC/bin/llvm-nm
+          export STRIP=$TC/bin/llvm-strip
           cd libvpx
           ./configure --prefix=$HOME/vpx-build/${ARCH} \
             --target=${VPX_TARGET} \
             --disable-examples --disable-unit-tests \
             --enable-static --disable-shared --disable-docs \
-            --libc=system \
+            --libc=bionic \
             --as=$AS --ar=$AR --nm=$NM --strip=$STRIP \
             --sysroot=$SYSROOT
           make -j$(nproc) install
